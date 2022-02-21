@@ -28,63 +28,51 @@ import type { Renderer } from '../Renderer';
  * stack stores the currently applied masks in order. Each {@link PIXI.BaseRenderTexture} holds its own mask stack, i.e.
  * when you switch render-textures, the old masks only applied when you switch back to rendering to the old render-target.
  *
- * @class
- * @extends PIXI.System
  * @memberof PIXI
  */
 export class MaskSystem implements ISystem
 {
+    /**
+     * Flag to enable scissor masking.
+     *
+     * @default true
+     */
     public enableScissor: boolean;
+
+    /** Pool of used sprite mask filters. */
     protected readonly alphaMaskPool: Array<SpriteMaskFilter[]>;
+
+    /**
+     * Current index of alpha mask pool.
+     * @default 0
+     * @readonly
+     */
     protected alphaMaskIndex: number;
+
+    /** Pool of mask data. */
     private readonly maskDataPool: Array<MaskData>;
     private maskStack: Array<MaskData>;
     private renderer: Renderer;
 
     /**
-     * @param {PIXI.Renderer} renderer - The renderer this System works for.
+     * @param renderer - The renderer this System works for.
      */
     constructor(renderer: Renderer)
     {
         this.renderer = renderer;
 
-        /**
-         * Enable scissor masking.
-         *
-         * @member {boolean}
-         * @readonly
-         */
         this.enableScissor = true;
-
-        /**
-         * Pool of used sprite mask filters
-         * @member {PIXI.SpriteMaskFilter[]}
-         * @readonly
-         */
         this.alphaMaskPool = [];
-
-        /**
-         * Pool of mask data
-         * @member {PIXI.MaskData[]}
-         * @readonly
-         */
         this.maskDataPool = [];
 
         this.maskStack = [];
-
-        /**
-         * Current index of alpha mask pool
-         * @member {number}
-         * @default 0
-         * @readonly
-         */
         this.alphaMaskIndex = 0;
     }
 
     /**
      * Changes the mask stack that is used by this System.
      *
-     * @param {PIXI.MaskData[]} maskStack - The mask stack
+     * @param maskStack - The mask stack
      */
     setMaskStack(maskStack: Array<MaskData>): void
     {
@@ -114,31 +102,44 @@ export class MaskSystem implements ISystem
             maskData = d;
         }
 
+        const maskAbove = this.maskStack.length !== 0 ? this.maskStack[this.maskStack.length - 1] : null;
+
+        maskData.copyCountersOrReset(maskAbove);
+
         if (maskData.autoDetect)
         {
             this.detect(maskData);
         }
 
-        maskData.copyCountersOrReset(this.maskStack[this.maskStack.length - 1]);
         maskData._target = target;
 
-        switch (maskData.type)
+        if (maskData.type !== MASK_TYPES.SPRITE)
         {
-            case MASK_TYPES.SCISSOR:
-                this.maskStack.push(maskData);
-                this.renderer.scissor.push(maskData);
-                break;
-            case MASK_TYPES.STENCIL:
-                this.maskStack.push(maskData);
-                this.renderer.stencil.push(maskData);
-                break;
-            case MASK_TYPES.SPRITE:
-                maskData.copyCountersOrReset(null);
-                this.pushSpriteMask(maskData);
-                this.maskStack.push(maskData);
-                break;
-            default:
-                break;
+            this.maskStack.push(maskData);
+        }
+
+        if (maskData.enabled)
+        {
+            switch (maskData.type)
+            {
+                case MASK_TYPES.SCISSOR:
+                    this.renderer.scissor.push(maskData);
+                    break;
+                case MASK_TYPES.STENCIL:
+                    this.renderer.stencil.push(maskData);
+                    break;
+                case MASK_TYPES.SPRITE:
+                    maskData.copyCountersOrReset(null);
+                    this.pushSpriteMask(maskData);
+                    break;
+                default:
+                    break;
+            }
+        }
+
+        if (maskData.type === MASK_TYPES.SPRITE)
+        {
+            this.maskStack.push(maskData);
         }
     }
 
@@ -160,19 +161,22 @@ export class MaskSystem implements ISystem
             return;
         }
 
-        switch (maskData.type)
+        if (maskData.enabled)
         {
-            case MASK_TYPES.SCISSOR:
-                this.renderer.scissor.pop();
-                break;
-            case MASK_TYPES.STENCIL:
-                this.renderer.stencil.pop(maskData.maskObject);
-                break;
-            case MASK_TYPES.SPRITE:
-                this.popSpriteMask();
-                break;
-            default:
-                break;
+            switch (maskData.type)
+            {
+                case MASK_TYPES.SCISSOR:
+                    this.renderer.scissor.pop();
+                    break;
+                case MASK_TYPES.STENCIL:
+                    this.renderer.stencil.pop(maskData.maskObject);
+                    break;
+                case MASK_TYPES.SPRITE:
+                    this.popSpriteMask(maskData);
+                    break;
+                default:
+                    break;
+            }
         }
 
         maskData.reset();
@@ -181,12 +185,19 @@ export class MaskSystem implements ISystem
         {
             this.maskDataPool.push(maskData);
         }
+
+        if (this.maskStack.length !== 0)
+        {
+            const maskCurrent = this.maskStack[this.maskStack.length - 1];
+
+            if (maskCurrent.type === MASK_TYPES.SPRITE && maskCurrent._filters)
+            {
+                maskCurrent._filters[0].maskSprite = maskCurrent.maskObject;
+            }
+        }
     }
 
-    /**
-     * Sets type of MaskData based on its maskObject
-     * @param {PIXI.MaskData} maskData
-     */
+    /** Sets type of MaskData based on its maskObject. */
     detect(maskData: MaskData): void
     {
         const maskObject = maskData.maskObject;
@@ -194,77 +205,93 @@ export class MaskSystem implements ISystem
         if (maskObject.isSprite)
         {
             maskData.type = MASK_TYPES.SPRITE;
-
-            return;
         }
-        maskData.type = MASK_TYPES.STENCIL;
-        // detect scissor in graphics
-        if (this.enableScissor
-            && maskObject.isFastRect
-            && maskObject.isFastRect())
+        else if (this.enableScissor && this.renderer.scissor.testScissor(maskData))
         {
-            const matrix = maskObject.worldTransform;
-
-            // TODO: move the check to the matrix itself
-            // we are checking that its orthogonal and x rotation is 0 90 180 or 270
-
-            let rotX = Math.atan2(matrix.b, matrix.a);
-            let rotXY = Math.atan2(matrix.d, matrix.c);
-
-            // use the nearest degree to 0.01
-            rotX = Math.round(rotX * (180 / Math.PI) * 100);
-            rotXY = Math.round(rotXY * (180 / Math.PI) * 100) - rotX;
-
-            rotX = ((rotX % 9000) + 9000) % 9000;
-            rotXY = ((rotXY % 18000) + 18000) % 18000;
-
-            if (rotX === 0 && rotXY === 9000)
-            {
-                maskData.type = MASK_TYPES.SCISSOR;
-            }
+            maskData.type = MASK_TYPES.SCISSOR;
+        }
+        else
+        {
+            maskData.type = MASK_TYPES.STENCIL;
         }
     }
 
     /**
      * Applies the Mask and adds it to the current filter stack.
      *
-     * @param {PIXI.MaskData} maskData - Sprite to be used as the mask
+     * @param maskData - Sprite to be used as the mask.
      */
     pushSpriteMask(maskData: MaskData): void
     {
         const { maskObject } = maskData;
         const target = maskData._target;
-        let alphaMaskFilter = this.alphaMaskPool[this.alphaMaskIndex];
+        let alphaMaskFilter = maskData._filters;
 
         if (!alphaMaskFilter)
         {
-            alphaMaskFilter = this.alphaMaskPool[this.alphaMaskIndex] = [new SpriteMaskFilter(maskObject)];
+            alphaMaskFilter = this.alphaMaskPool[this.alphaMaskIndex];
+
+            if (!alphaMaskFilter)
+            {
+                alphaMaskFilter = this.alphaMaskPool[this.alphaMaskIndex] = [new SpriteMaskFilter()];
+            }
         }
 
-        alphaMaskFilter[0].resolution = this.renderer.resolution;
+        const renderer = this.renderer;
+        const renderTextureSystem = renderer.renderTexture;
+
+        let resolution;
+        let multisample;
+
+        if (renderTextureSystem.current)
+        {
+            const renderTexture = renderTextureSystem.current;
+
+            resolution = maskData.resolution || renderTexture.resolution;
+            multisample = maskData.multisample ?? renderTexture.multisample;
+        }
+        else
+        {
+            resolution = maskData.resolution || renderer.resolution;
+            multisample = maskData.multisample ?? renderer.multisample;
+        }
+
+        alphaMaskFilter[0].resolution = resolution;
+        alphaMaskFilter[0].multisample = multisample;
         alphaMaskFilter[0].maskSprite = maskObject;
 
         const stashFilterArea = target.filterArea;
 
         target.filterArea = maskObject.getBounds(true);
-        this.renderer.filter.push(target, alphaMaskFilter);
+        renderer.filter.push(target, alphaMaskFilter);
         target.filterArea = stashFilterArea;
 
-        this.alphaMaskIndex++;
+        if (!maskData._filters)
+        {
+            this.alphaMaskIndex++;
+        }
     }
 
     /**
      * Removes the last filter from the filter stack and doesn't return it.
+     *
+     * @param maskData - Sprite to be used as the mask.
      */
-    popSpriteMask(): void
+    popSpriteMask(maskData: MaskData): void
     {
         this.renderer.filter.pop();
-        this.alphaMaskIndex--;
+
+        if (maskData._filters)
+        {
+            maskData._filters[0].maskSprite = null;
+        }
+        else
+        {
+            this.alphaMaskIndex--;
+            this.alphaMaskPool[this.alphaMaskIndex][0].maskSprite = null;
+        }
     }
 
-    /**
-     * @ignore
-     */
     destroy(): void
     {
         this.renderer = null;

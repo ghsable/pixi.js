@@ -1,17 +1,16 @@
 import type { IPointData } from './IPointData';
 import type { IPoint } from './IPoint';
 
+export interface ObservablePoint extends GlobalMixins.Point, IPoint {}
+
 /**
  * The ObservablePoint object represents a location in a two-dimensional coordinate system, where `x` represents
  * the position on the horizontal axis and `y` represents the position on the vertical axis.
  *
  * An `ObservablePoint` is a point that triggers a callback when the point's position is changed.
  *
- * @class
  * @memberof PIXI
- * @implements IPoint
  */
-
 export class ObservablePoint<T = any> implements IPoint
 {
     /** The callback function triggered when `x` and/or `y` are changed */
@@ -124,9 +123,7 @@ export class ObservablePoint<T = any> implements IPoint
     }
     // #endif
 
-    /** Position of the observable point on the x axis
-     * @type {number}
-     */
+    /** Position of the observable point on the x axis. */
     get x(): number
     {
         return this._x;
@@ -141,9 +138,7 @@ export class ObservablePoint<T = any> implements IPoint
         }
     }
 
-    /** Position of the observable point on the y axis
-     * @type {number}
-     */
+    /** Position of the observable point on the y axis. */
     get y(): number
     {
         return this._y;

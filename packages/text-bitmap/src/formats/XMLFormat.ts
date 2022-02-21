@@ -3,7 +3,6 @@ import { BitmapFontData } from '../BitmapFontData';
 /**
  * BitmapFont format that's XML-based.
  *
- * @class
  * @private
  */
 export class XMLFormat
@@ -11,10 +10,8 @@ export class XMLFormat
     /**
      * Check if resource refers to xml font data.
      *
-     * @static
-     * @private
-     * @param {any} data
-     * @return {boolean} True if resource could be treated as font data, false otherwise.
+     * @param data
+     * @return - True if resource could be treated as font data, false otherwise.
      */
     static test(data: unknown): boolean
     {
@@ -26,10 +23,8 @@ export class XMLFormat
     /**
      * Convert the XML into BitmapFontData that we can use.
      *
-     * @static
-     * @private
-     * @param {XMLDocument} xml
-     * @return {BitmapFontData} Data to use for BitmapFont
+     * @param xml
+     * @return - Data to use for BitmapFont
      */
     static parse(xml: XMLDocument): BitmapFontData
     {
@@ -39,6 +34,7 @@ export class XMLFormat
         const page = xml.getElementsByTagName('page');
         const char = xml.getElementsByTagName('char');
         const kerning = xml.getElementsByTagName('kerning');
+        const distanceField = xml.getElementsByTagName('distanceField');
 
         for (let i = 0; i < info.length; i++)
         {
@@ -86,6 +82,14 @@ export class XMLFormat
                 first: parseInt(kerning[i].getAttribute('first'), 10),
                 second: parseInt(kerning[i].getAttribute('second'), 10),
                 amount: parseInt(kerning[i].getAttribute('amount'), 10),
+            });
+        }
+
+        for (let i = 0; i < distanceField.length; i++)
+        {
+            data.distanceField.push({
+                fieldType: distanceField[i].getAttribute('fieldType'),
+                distanceRange: parseInt(distanceField[i].getAttribute('distanceRange'), 10),
             });
         }
 

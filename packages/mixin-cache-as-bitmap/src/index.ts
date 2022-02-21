@@ -1,16 +1,23 @@
-import { Texture, BaseTexture, RenderTexture, Renderer, MaskData } from '@pixi/core';
+import { Texture, BaseTexture, RenderTexture, Renderer, MaskData, AbstractRenderer } from '@pixi/core';
 import { Sprite } from '@pixi/sprite';
 import { Container, DisplayObject, IDestroyOptions } from '@pixi/display';
 import { IPointData, Matrix, Rectangle } from '@pixi/math';
 import { uid } from '@pixi/utils';
 import { settings } from '@pixi/settings';
-import type { CanvasRenderer } from '@pixi/canvas-renderer';
+import { MSAA_QUALITY } from '@pixi/constants';
+
+// Don't import CanvasRender to remove dependency on this optional package
+// this type should satisify these requirements for cacheAsBitmap types
+interface CanvasRenderer extends AbstractRenderer {
+    context: CanvasRenderingContext2D;
+}
 
 const _tempMatrix = new Matrix();
 
 DisplayObject.prototype._cacheAsBitmap = false;
 DisplayObject.prototype._cacheData = null;
 DisplayObject.prototype._cacheAsBitmapResolution = null;
+DisplayObject.prototype._cacheAsBitmapMultisample = MSAA_QUALITY.NONE;
 
 // figured there's no point adding ALL the extra variables to prototype.
 // this model can hold the information needed. This can also be generated on demand as
@@ -24,7 +31,7 @@ export class CacheData
 {
     public textureCacheId: string;
     public originalRender: (renderer: Renderer) => void;
-    public originalRenderCanvas: (renderer: CanvasRenderer) => void;
+    public originalRenderCanvas: (renderer: AbstractRenderer) => void;
     public originalCalculateBounds: () => void;
     public originalGetLocalBounds: (rect?: Rectangle) => Rectangle;
     public originalUpdateTransform: () => void;
@@ -80,6 +87,38 @@ Object.defineProperties(DisplayObject.prototype, {
             if (this.cacheAsBitmap)
             {
                 // Toggle to re-render at the new resolution
+                this.cacheAsBitmap = false;
+                this.cacheAsBitmap = true;
+            }
+        },
+    },
+
+    /**
+     * The number of samples to use for cacheAsBitmap. If set to `null`, the renderer's
+     * sample count is used.
+     * If `cacheAsBitmap` is set to `true`, this will re-render with the new number of samples.
+     *
+     * @member {number} cacheAsBitmapMultisample
+     * @memberof PIXI.DisplayObject#
+     * @default PIXI.MSAA_QUALITY.NONE
+     */
+    cacheAsBitmapMultisample: {
+        get(): MSAA_QUALITY
+        {
+            return this._cacheAsBitmapMultisample;
+        },
+        set(multisample: MSAA_QUALITY): void
+        {
+            if (multisample === this._cacheAsBitmapMultisample)
+            {
+                return;
+            }
+
+            this._cacheAsBitmapMultisample = multisample;
+
+            if (this.cacheAsBitmap)
+            {
+                // Toggle to re-render with new multisample
                 this.cacheAsBitmap = false;
                 this.cacheAsBitmap = true;
             }
@@ -221,7 +260,7 @@ DisplayObject.prototype._initCachedDisplayObject = function _initCachedDisplayOb
     const bounds = (this as Container).getLocalBounds(null, true).clone();
 
     // add some padding!
-    if (this.filters)
+    if (this.filters && this.filters.length)
     {
         const padding = this.filters[0].padding;
 
@@ -245,6 +284,7 @@ DisplayObject.prototype._initCachedDisplayObject = function _initCachedDisplayOb
         width: bounds.width,
         height: bounds.height,
         resolution: this.cacheAsBitmapResolution || renderer.resolution,
+        multisample: this.cacheAsBitmapMultisample ?? renderer.multisample,
     });
 
     const textureCacheId = `cacheAsBitmap_${uid()}`;
@@ -261,6 +301,7 @@ DisplayObject.prototype._initCachedDisplayObject = function _initCachedDisplayOb
     this.render = this._cacheData.originalRender;
 
     renderer.render(this, { renderTexture, clear: true, transform: m, skipUpdateTransform: false });
+    renderer.framebuffer.blit();
 
     // now restore the state be setting the new properties
     renderer.projection.transform = cachedProjectionTransform;
@@ -314,7 +355,7 @@ DisplayObject.prototype._initCachedDisplayObject = function _initCachedDisplayOb
  * @memberof PIXI.DisplayObject#
  * @param {PIXI.CanvasRenderer} renderer - The canvas renderer
  */
-DisplayObject.prototype._renderCachedCanvas = function _renderCachedCanvas(renderer: CanvasRenderer): void
+DisplayObject.prototype._renderCachedCanvas = function _renderCachedCanvas(renderer: AbstractRenderer): void
 {
     if (!this.visible || this.worldAlpha <= 0 || !this.renderable)
     {

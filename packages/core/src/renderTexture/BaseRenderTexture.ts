@@ -43,19 +43,21 @@ export interface BaseRenderTexture extends GlobalMixins.BaseRenderTexture, BaseT
  * renderer.render(sprite, {renderTexture});  // Renders to center of RenderTexture
  * ```
  *
- * @class
- * @extends PIXI.BaseTexture
  * @memberof PIXI
  */
 export class BaseRenderTexture extends BaseTexture
 {
     public clearColor: number[];
     public framebuffer: Framebuffer;
+
+    /** The data structure for the stencil masks. */
     maskStack: Array<MaskData>;
+
+    /** The data structure for the filters. */
     filterStack: Array<any>;
 
     /**
-     * @param {object} [options]
+     * @param options
      * @param {number} [options.width=100] - The width of the base render texture.
      * @param {number} [options.height=100] - The height of the base render texture.
      * @param {PIXI.SCALE_MODES} [options.scaleMode=PIXI.settings.SCALE_MODE] - See {@link PIXI.SCALE_MODES}
@@ -79,50 +81,37 @@ export class BaseRenderTexture extends BaseTexture
             /* eslint-enable prefer-rest-params */
         }
 
-        super(null, options);
+        options.width = options.width || 100;
+        options.height = options.height || 100;
+        options.multisample = options.multisample !== undefined ? options.multisample : MSAA_QUALITY.NONE;
 
-        const { width, height, multisample } = options || {};
+        super(null, options);
 
         // Set defaults
         this.mipmap = MIPMAP_MODES.OFF;
-        this.width = Math.ceil(width) || 100;
-        this.height = Math.ceil(height) || 100;
         this.valid = true;
 
         this.clearColor = [0, 0, 0, 0];
 
-        this.framebuffer = new Framebuffer(this.width * this.resolution, this.height * this.resolution)
+        this.framebuffer = new Framebuffer(this.realWidth, this.realHeight)
             .addColorTexture(0, this);
-        this.framebuffer.multisample = multisample !== undefined ? multisample : MSAA_QUALITY.NONE;
+        this.framebuffer.multisample = options.multisample;
 
         // TODO - could this be added the systems?
-
-        /**
-         * The data structure for the stencil masks.
-         *
-         * @member {PIXI.MaskData[]}
-         */
         this.maskStack = [];
-
-        /**
-         * The data structure for the filters.
-         *
-         * @member {Object[]}
-         */
         this.filterStack = [{}];
     }
 
     /**
      * Resizes the BaseRenderTexture.
      *
-     * @param {number} width - The width to resize to.
-     * @param {number} height - The height to resize to.
+     * @param desiredWidth - The desired width to resize to.
+     * @param desiredHeight - The desired height to resize to.
      */
-    resize(width: number, height: number): void
+    resize(desiredWidth: number, desiredHeight: number): void
     {
-        width = Math.ceil(width);
-        height = Math.ceil(height);
-        this.framebuffer.resize(width * this.resolution, height * this.resolution);
+        this.framebuffer.resize(desiredWidth * this.resolution, desiredHeight * this.resolution);
+        this.setRealSize(this.framebuffer.width, this.framebuffer.height);
     }
 
     /**
@@ -139,9 +128,7 @@ export class BaseRenderTexture extends BaseTexture
         super.dispose();
     }
 
-    /**
-     * Destroys this texture.
-     */
+    /** Destroys this texture. */
     destroy(): void
     {
         super.destroy();

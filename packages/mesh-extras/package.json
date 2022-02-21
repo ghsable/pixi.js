@@ -1,6 +1,6 @@
 {
   "name": "@pixi/mesh-extras",
-  "version": "6.0.4",
+  "version": "6.2.1",
   "main": "dist/cjs/mesh-extras.js",
   "module": "dist/esm/mesh-extras.js",
   "bundle": "dist/browser/mesh-extras.js",
@@ -24,14 +24,11 @@
     "dist",
     "*.d.ts"
   ],
-  "dependencies": {
-    "@pixi/constants": "6.0.4",
-    "@pixi/core": "6.0.4",
-    "@pixi/math": "6.0.4",
-    "@pixi/mesh": "6.0.4",
-    "@pixi/utils": "6.0.4"
-  },
-  "devDependencies": {
-    "@pixi/loaders": "6.0.4"
+  "peerDependencies": {
+    "@pixi/constants": "6.2.1",
+    "@pixi/core": "6.2.1",
+    "@pixi/math": "6.2.1",
+    "@pixi/mesh": "6.2.1",
+    "@pixi/utils": "6.2.1"
   }
 }

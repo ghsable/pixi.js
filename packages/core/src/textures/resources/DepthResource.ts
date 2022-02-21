@@ -4,20 +4,21 @@ import { BufferResource } from './BufferResource';
 import type { BaseTexture } from '../BaseTexture';
 import type { Renderer } from '../../Renderer';
 import type { GLTexture } from '../GLTexture';
+
 /**
  * Resource type for DepthTexture.
- * @class
- * @extends PIXI.BufferResource
+ *
  * @memberof PIXI
  */
 export class DepthResource extends BufferResource
 {
     /**
      * Upload the texture to the GPU.
-     * @param {PIXI.Renderer} renderer - Upload to the renderer
-     * @param {PIXI.BaseTexture} baseTexture - Reference to parent texture
-     * @param {PIXI.GLTexture} glTexture - glTexture
-     * @returns {boolean} true is success
+     *
+     * @param renderer - Upload to the renderer
+     * @param baseTexture - Reference to parent texture
+     * @param glTexture - glTexture
+     * @return - true is success
      */
     upload(renderer: Renderer, baseTexture: BaseTexture, glTexture: GLTexture): boolean
     {
@@ -38,7 +39,7 @@ export class DepthResource extends BufferResource
                 width,
                 height,
                 baseTexture.format,
-                baseTexture.type,
+                glTexture.type,
                 this.data,
             );
         }
@@ -50,13 +51,12 @@ export class DepthResource extends BufferResource
             gl.texImage2D(
                 baseTexture.target,
                 0,
-                //  gl.DEPTH_COMPONENT16 Needed for depth to render properly in webgl2.0
-                renderer.context.webGLVersion === 1 ? gl.DEPTH_COMPONENT : gl.DEPTH_COMPONENT16,
+                glTexture.internalFormat,
                 width,
                 height,
                 0,
                 baseTexture.format,
-                baseTexture.type,
+                glTexture.type,
                 this.data,
             );
         }

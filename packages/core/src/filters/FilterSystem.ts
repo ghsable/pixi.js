@@ -3,7 +3,7 @@ import { Quad } from '../utils/Quad';
 import { QuadUv } from '../utils/QuadUv';
 import { Rectangle, Matrix, Point } from '@pixi/math';
 import { UniformGroup } from '../shader/UniformGroup';
-import { DRAW_MODES, CLEAR_MODES } from '@pixi/constants';
+import { DRAW_MODES, CLEAR_MODES, MSAA_QUALITY } from '@pixi/constants';
 import { FilterState } from './FilterState';
 
 import type { ISystem } from '../ISystem';
@@ -40,87 +40,79 @@ const tempMatrix = new Matrix();
  * * **pop**: Use {@link PIXI.FilterSystem#pop} to pop & execute the filters you initially pushed. It will apply them
  *      serially and output to the bounds of the filter-target.
  *
- * @class
  * @memberof PIXI
- * @extends PIXI.System
  */
 export class FilterSystem implements ISystem
 {
+    /**
+     * List of filters for the FilterSystem
+     * @member {Object[]}
+     */
     public readonly defaultFilterStack: Array<FilterState>;
+
+    /** A pool for storing filter states, save us creating new ones each tick. */
     public statePool: Array<FilterState>;
+
+    /** Stores a bunch of POT textures used for filtering. */
     public texturePool: RenderTexturePool;
+
+    /** Whether to clear output renderTexture in AUTO/BLIT mode. See {@link PIXI.CLEAR_MODES}. */
     public forceClear: boolean;
+
+    /**
+     * Old padding behavior is to use the max amount instead of sum padding.
+     * Use this flag if you need the old behavior.
+     * @default false
+     */
     public useMaxPadding: boolean;
+
+    /** A very simple geometry used when drawing a filter effect to the screen. */
     protected quad: Quad;
+
+    /** Quad UVs */
     protected quadUv: QuadUv;
+
+    /**
+     * Active state
+     * @member {object}
+     */
     protected activeState: FilterState;
+
+    /**
+     * This uniform group is attached to filter uniforms when used.
+     *
+     * @property {PIXI.Rectangle} outputFrame
+     * @property {Float32Array} inputSize
+     * @property {Float32Array} inputPixel
+     * @property {Float32Array} inputClamp
+     * @property {Number} resolution
+     * @property {Float32Array} filterArea
+     * @property {Float32Array} filterClamp
+     */
     protected globalUniforms: UniformGroup;
+
+    /** Temporary rect for math. */
     private tempRect: Rectangle;
     public renderer: Renderer;
 
     /**
-     * @param {PIXI.Renderer} renderer - The renderer this System works for.
+     * @param renderer - The renderer this System works for.
      */
     constructor(renderer: Renderer)
     {
         this.renderer = renderer;
 
-        /**
-         * List of filters for the FilterSystem
-         * @member {Object[]}
-         * @readonly
-         */
         this.defaultFilterStack = [{}] as any;
 
-        /**
-         * stores a bunch of PO2 textures used for filtering
-         * @member {Object}
-         */
         this.texturePool = new RenderTexturePool();
-
         this.texturePool.setScreenSize(renderer.view);
-
-        /**
-         * a pool for storing filter states, save us creating new ones each tick
-         * @member {Object[]}
-         */
         this.statePool = [];
 
-        /**
-         * A very simple geometry used when drawing a filter effect to the screen
-         * @member {PIXI.Quad}
-         */
         this.quad = new Quad();
-
-        /**
-         * Quad UVs
-         * @member {PIXI.QuadUv}
-         */
         this.quadUv = new QuadUv();
-
-        /**
-         * Temporary rect for maths
-         * @type {PIXI.Rectangle}
-         */
         this.tempRect = new Rectangle();
-
-        /**
-         * Active state
-         * @member {object}
-         */
         this.activeState = {} as any;
 
-        /**
-         * This uniform group is attached to filter uniforms when used
-         * @member {PIXI.UniformGroup}
-         * @property {PIXI.Rectangle} outputFrame
-         * @property {Float32Array} inputSize
-         * @property {Float32Array} inputPixel
-         * @property {Float32Array} inputClamp
-         * @property {Number} resolution
-         * @property {Float32Array} filterArea
-         * @property {Float32Array} filterClamp
-         */
         this.globalUniforms = new UniformGroup({
             outputFrame: new Rectangle(),
             inputSize: new Float32Array(4),
@@ -133,18 +125,7 @@ export class FilterSystem implements ISystem
             filterClamp: new Float32Array(4),
         }, true);
 
-        /**
-         * Whether to clear output renderTexture in AUTO/BLIT mode. See {@link PIXI.CLEAR_MODES}
-         * @member {boolean}
-         */
         this.forceClear = false;
-
-        /**
-         * Old padding behavior is to use the max amount instead of sum padding.
-         * Use this flag if you need the old behavior.
-         * @member {boolean}
-         * @default false
-         */
         this.useMaxPadding = false;
     }
 
@@ -153,7 +134,7 @@ export class FilterSystem implements ISystem
      * input render-texture for the rest of the filtering pipeline.
      *
      * @param {PIXI.DisplayObject} target - The target of the filter to render.
-     * @param {PIXI.Filter[]} filters - The filters to apply.
+     * @param filters - The filters to apply.
      */
     push(target: IFilterTarget, filters: Array<Filter>): void
     {
@@ -163,16 +144,21 @@ export class FilterSystem implements ISystem
         const renderTextureSystem = this.renderer.renderTexture;
 
         let resolution = filters[0].resolution;
+        let multisample = filters[0].multisample;
         let padding = filters[0].padding;
         let autoFit = filters[0].autoFit;
-        let legacy = filters[0].legacy;
+        // We don't know whether it's a legacy filter until it was bound for the first time,
+        // therefore we have to assume that it is if legacy is undefined.
+        let legacy = filters[0].legacy ?? true;
 
         for (let i = 1; i < filters.length; i++)
         {
             const filter = filters[i];
 
-            // lets use the lowest resolution..
+            // let's use the lowest resolution
             resolution = Math.min(resolution, filter.resolution);
+            // let's use the lowest number of samples
+            multisample = Math.min(multisample, filter.multisample);
             // figure out the padding required for filters
             padding = this.useMaxPadding
                 // old behavior: use largest amount of padding!
@@ -182,7 +168,7 @@ export class FilterSystem implements ISystem
             // only auto fit if all filters are autofit
             autoFit = autoFit && filter.autoFit;
 
-            legacy = legacy || filter.legacy;
+            legacy = legacy || (filter.legacy ?? true);
         }
 
         if (filterStack.length === 1)
@@ -193,6 +179,7 @@ export class FilterSystem implements ISystem
         filterStack.push(state);
 
         state.resolution = resolution;
+        state.multisample = multisample;
 
         state.legacy = legacy;
 
@@ -226,7 +213,8 @@ export class FilterSystem implements ISystem
             renderer.projection.transform,
         );
 
-        state.renderTexture = this.getOptimalFilterTexture(state.sourceFrame.width, state.sourceFrame.height, resolution);
+        state.renderTexture = this.getOptimalFilterTexture(state.sourceFrame.width, state.sourceFrame.height,
+            resolution, multisample);
         state.filters = filters;
 
         state.destinationFrame.width = state.renderTexture.width;
@@ -249,9 +237,7 @@ export class FilterSystem implements ISystem
         renderer.framebuffer.clear(0, 0, 0, 0);
     }
 
-    /**
-     * Pops off the filter and applies it.
-     */
+    /** Pops off the filter and applies it. */
     pop(): void
     {
         const filterStack = this.defaultFilterStack;
@@ -274,8 +260,8 @@ export class FilterSystem implements ISystem
         inputSize[2] = 1.0 / inputSize[0];
         inputSize[3] = 1.0 / inputSize[1];
 
-        inputPixel[0] = inputSize[0] * state.resolution;
-        inputPixel[1] = inputSize[1] * state.resolution;
+        inputPixel[0] = Math.round(inputSize[0] * state.resolution);
+        inputPixel[1] = Math.round(inputSize[1] * state.resolution);
         inputPixel[2] = 1.0 / inputPixel[0];
         inputPixel[3] = 1.0 / inputPixel[1];
 
@@ -301,10 +287,7 @@ export class FilterSystem implements ISystem
 
         const lastState = filterStack[filterStack.length - 1];
 
-        if (state.renderTexture.framebuffer.multisample > 1)
-        {
-            this.renderer.framebuffer.blit();
-        }
+        this.renderer.framebuffer.blit();
 
         if (filters.length === 1)
         {
@@ -327,6 +310,17 @@ export class FilterSystem implements ISystem
 
             for (i = 0; i < filters.length - 1; ++i)
             {
+                if (i === 1 && state.multisample > 1)
+                {
+                    flop = this.getOptimalFilterTexture(
+                        flip.width,
+                        flip.height,
+                        state.resolution
+                    );
+
+                    flop.filterFrame = flip.filterFrame;
+                }
+
                 filters[i].apply(this, flip, flop, CLEAR_MODES.CLEAR, state);
 
                 const t = flip;
@@ -337,9 +331,16 @@ export class FilterSystem implements ISystem
 
             filters[i].apply(this, flip, lastState.renderTexture, CLEAR_MODES.BLEND, state);
 
+            if (i > 1 && state.multisample > 1)
+            {
+                this.returnFilterTexture(state.renderTexture);
+            }
+
             this.returnFilterTexture(flip);
             this.returnFilterTexture(flop);
         }
+
+        // lastState.renderTexture is blitted when lastState is popped
 
         state.clear();
         this.statePool.push(state);
@@ -348,10 +349,10 @@ export class FilterSystem implements ISystem
     /**
      * Binds a renderTexture with corresponding `filterFrame`, clears it if mode corresponds.
      *
-     * @param {PIXI.RenderTexture} filterTexture - renderTexture to bind, should belong to filter pool or filter stack
-     * @param {PIXI.CLEAR_MODES} [clearMode] - clearMode, by default its CLEAR/YES. See {@link PIXI.CLEAR_MODES}
+     * @param filterTexture - renderTexture to bind, should belong to filter pool or filter stack
+     * @param clearMode - clearMode, by default its CLEAR/YES. See {@link PIXI.CLEAR_MODES}
      */
-    bindAndClear(filterTexture: RenderTexture, clearMode = CLEAR_MODES.CLEAR): void
+    bindAndClear(filterTexture: RenderTexture, clearMode: CLEAR_MODES = CLEAR_MODES.CLEAR): void
     {
         const {
             renderTexture: renderTextureSystem,
@@ -409,12 +410,14 @@ export class FilterSystem implements ISystem
     }
 
     /**
-     * Draws a filter.
+     * Draws a filter using the default rendering process.
      *
-     * @param {PIXI.Filter} filter - The filter to draw.
-     * @param {PIXI.RenderTexture} input - The input render target.
-     * @param {PIXI.RenderTexture} output - The target to output to.
-     * @param {PIXI.CLEAR_MODES} [clearMode] - Should the output be cleared before rendering to it
+     * This should be called only by {@link Filter#apply}.
+     *
+     * @param filter - The filter to draw.
+     * @param input - The input render target.
+     * @param output - The target to output to.
+     * @param clearMode - Should the output be cleared before rendering to it
      */
     applyFilter(filter: Filter, input: RenderTexture, output: RenderTexture, clearMode?: CLEAR_MODES): void
     {
@@ -455,9 +458,9 @@ export class FilterSystem implements ISystem
      *
      * Use `outputMatrix * vTextureCoord` in the shader.
      *
-     * @param {PIXI.Matrix} outputMatrix - The matrix to output to.
+     * @param outputMatrix - The matrix to output to.
      * @param {PIXI.Sprite} sprite - The sprite to map to.
-     * @return {PIXI.Matrix} The mapped matrix.
+     * @return The mapped matrix.
      */
     calculateSpriteMatrix(outputMatrix: Matrix, sprite: ISpriteMaskTarget): Matrix
     {
@@ -475,9 +478,7 @@ export class FilterSystem implements ISystem
         return mappedMatrix;
     }
 
-    /**
-     * Destroys this Filter System.
-     */
+    /** Destroys this Filter System. */
     destroy(): void
     {
         this.renderer = null;
@@ -489,26 +490,27 @@ export class FilterSystem implements ISystem
     /**
      * Gets a Power-of-Two render texture or fullScreen texture
      *
-     * @protected
-     * @param {number} minWidth - The minimum width of the render texture in real pixels.
-     * @param {number} minHeight - The minimum height of the render texture in real pixels.
-     * @param {number} [resolution=1] - The resolution of the render texture.
-     * @return {PIXI.RenderTexture} The new render texture.
+     * @param minWidth - The minimum width of the render texture in real pixels.
+     * @param minHeight - The minimum height of the render texture in real pixels.
+     * @param resolution - The resolution of the render texture.
+     * @param multisample - Number of samples of the render texture.
+     * @return - The new render texture.
      */
-    protected getOptimalFilterTexture(minWidth: number, minHeight: number, resolution = 1): RenderTexture
+    protected getOptimalFilterTexture(minWidth: number, minHeight: number, resolution = 1,
+        multisample: MSAA_QUALITY = MSAA_QUALITY.NONE): RenderTexture
     {
-        return this.texturePool.getOptimalTexture(minWidth, minHeight, resolution);
+        return this.texturePool.getOptimalTexture(minWidth, minHeight, resolution, multisample);
     }
 
     /**
      * Gets extra render texture to use inside current filter
      * To be compliant with older filters, you can use params in any order
      *
-     * @param {PIXI.RenderTexture} [input] - renderTexture from which size and resolution will be copied
-     * @param {number} [resolution] - override resolution of the renderTexture
-     * @returns {PIXI.RenderTexture}
+     * @param input - renderTexture from which size and resolution will be copied
+     * @param resolution - override resolution of the renderTexture
+     * @param multisample - number of samples of the renderTexture
      */
-    getFilterTexture(input?: RenderTexture, resolution?: number): RenderTexture
+    getFilterTexture(input?: RenderTexture, resolution?: number, multisample?: MSAA_QUALITY): RenderTexture
     {
         if (typeof input === 'number')
         {
@@ -520,7 +522,8 @@ export class FilterSystem implements ISystem
 
         input = input || this.activeState.renderTexture;
 
-        const filterTexture = this.texturePool.getOptimalTexture(input.width, input.height, resolution || input.resolution);
+        const filterTexture = this.texturePool.getOptimalTexture(input.width, input.height, resolution || input.resolution,
+            multisample || MSAA_QUALITY.NONE);
 
         filterTexture.filterFrame = input.filterFrame;
 
@@ -530,32 +533,28 @@ export class FilterSystem implements ISystem
     /**
      * Frees a render texture back into the pool.
      *
-     * @param {PIXI.RenderTexture} renderTexture - The renderTarget to free
+     * @param renderTexture - The renderTarget to free
      */
     returnFilterTexture(renderTexture: RenderTexture): void
     {
         this.texturePool.returnTexture(renderTexture);
     }
 
-    /**
-     * Empties the texture pool.
-     */
+    /** Empties the texture pool. */
     emptyPool(): void
     {
         this.texturePool.clear(true);
     }
 
-    /**
-     * calls `texturePool.resize()`, affects fullScreen renderTextures
-     */
+    /** Calls `texturePool.resize()`, affects fullScreen renderTextures. */
     resize(): void
     {
         this.texturePool.setScreenSize(this.renderer.view);
     }
 
     /**
-     * @param {PIXI.Matrix} matrix - first param
-     * @param {PIXI.Rectangle} rect - second param
+     * @param matrix - first param
+     * @param rect - second param
      */
     private transformAABB(matrix: Matrix, rect: Rectangle): void
     {
@@ -593,13 +592,19 @@ export class FilterSystem implements ISystem
         transform?: Matrix
     )
     {
+        if (frame.width <= 0 || frame.height <= 0 || bindingSourceFrame.width <= 0 || bindingSourceFrame.height <= 0)
+        {
+            return;
+        }
+
         if (transform)
         {
             const { a, b, c, d } = transform;
 
             // Skip if skew/rotation present in matrix, except for multiple of 90° rotation. If rotation
             // is a multiple of 90°, then either pair of (b,c) or (a,d) will be (0,0).
-            if ((b !== 0 || c !== 0) && (a !== 0 || d !== 0))
+            if ((Math.abs(b) > 1e-4 || Math.abs(c) > 1e-4)
+                && (Math.abs(a) > 1e-4 || Math.abs(d) > 1e-4))
             {
                 return;
             }

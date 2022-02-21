@@ -4,8 +4,7 @@ import { accessibleTarget } from './accessibleTarget';
 
 import type { Rectangle } from '@pixi/math';
 import type { Container } from '@pixi/display';
-import type { Renderer } from '@pixi/core';
-import type { CanvasRenderer } from '@pixi/canvas-renderer';
+import type { Renderer, AbstractRenderer } from '@pixi/core';
 import type { IAccessibleHTMLElement } from './accessibleTarget';
 
 // add some extra variables to the container..
@@ -45,7 +44,7 @@ export class AccessibilityManager
      *
      * @type {PIXI.CanvasRenderer|PIXI.Renderer}
      */
-    public renderer: CanvasRenderer|Renderer;
+    public renderer: AbstractRenderer|Renderer;
 
     /** Internal variable, see isActive getter. */
     private _isActive = false;
@@ -77,7 +76,7 @@ export class AccessibilityManager
     /**
      * @param {PIXI.CanvasRenderer|PIXI.Renderer} renderer - A reference to the current renderer
      */
-    constructor(renderer: CanvasRenderer|Renderer)
+    constructor(renderer: AbstractRenderer|Renderer)
     {
         this._hookDiv = null;
 
@@ -116,7 +115,7 @@ export class AccessibilityManager
         this._onMouseMove = this._onMouseMove.bind(this);
 
         // let listen for tab.. once pressed we can fire up and show the accessibility layer
-        self.addEventListener('keydown', this._onKeyDown, false);
+        globalThis.addEventListener('keydown', this._onKeyDown, false);
     }
 
     /**
@@ -198,8 +197,8 @@ export class AccessibilityManager
 
         this._isActive = true;
 
-        self.document.addEventListener('mousemove', this._onMouseMove, true);
-        self.removeEventListener('keydown', this._onKeyDown, false);
+        globalThis.document.addEventListener('mousemove', this._onMouseMove, true);
+        globalThis.removeEventListener('keydown', this._onKeyDown, false);
 
         this.renderer.on('postrender', this.update, this);
         this.renderer.view.parentNode?.appendChild(this.div);
@@ -220,8 +219,8 @@ export class AccessibilityManager
 
         this._isActive = false;
 
-        self.document.removeEventListener('mousemove', this._onMouseMove, true);
-        self.addEventListener('keydown', this._onKeyDown, false);
+        globalThis.document.removeEventListener('mousemove', this._onMouseMove, true);
+        globalThis.addEventListener('keydown', this._onKeyDown, false);
 
         this.renderer.off('postrender', this.update);
         this.div.parentNode?.removeChild(this.div);
@@ -252,9 +251,12 @@ export class AccessibilityManager
 
         const children = displayObject.children;
 
-        for (let i = 0; i < children.length; i++)
+        if (children)
         {
-            this.updateAccessibleObjects(children[i] as Container);
+            for (let i = 0; i < children.length; i++)
+            {
+                this.updateAccessibleObjects(children[i] as Container);
+            }
         }
     }
 
@@ -593,8 +595,8 @@ export class AccessibilityManager
         this.destroyTouchHook();
         this.div = null;
 
-        self.document.removeEventListener('mousemove', this._onMouseMove, true);
-        self.removeEventListener('keydown', this._onKeyDown);
+        globalThis.document.removeEventListener('mousemove', this._onMouseMove, true);
+        globalThis.removeEventListener('keydown', this._onKeyDown);
 
         this.pool = null;
         this.children = null;

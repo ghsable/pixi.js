@@ -20,13 +20,18 @@ export function getAttributeData(program: WebGLProgram, gl: WebGLRenderingContex
     for (let i = 0; i < totalAttributes; i++)
     {
         const attribData = gl.getActiveAttrib(program, i);
-        const type = mapType(gl, attribData.type);
 
+        if (attribData.name.indexOf('gl_') === 0)
+        {
+            continue;
+        }
+
+        const type = mapType(gl, attribData.type);
         const data = {
             type,
             name: attribData.name,
             size: mapSize(type),
-            location: i,
+            location: gl.getAttribLocation(program, attribData.name),
         };
 
         attributes[attribData.name] = data;

@@ -33,11 +33,10 @@ const canvasRenderWorldTransform = new Matrix();
  */
 export class CanvasSpriteRenderer
 {
+    /** A reference to the current renderer */
     protected renderer: CanvasRenderer;
 
-    /**
-     * @param {PIXI.Renderer} renderer -The renderer sprite this batch works for.
-     */
+    /** @param renderer - A reference to the current renderer */
     constructor(renderer: CanvasRenderer)
     {
         this.renderer = renderer;
@@ -46,13 +45,18 @@ export class CanvasSpriteRenderer
     /**
      * Renders the sprite object.
      *
-     * @param {PIXI.Sprite} sprite - the sprite to render when using this spritebatch
+     * @param sprite - the sprite to render when using this spritebatch
      */
     render(sprite: Sprite): void
     {
         const texture = sprite._texture;
         const renderer = this.renderer;
         const context = renderer.context;
+
+        if (!texture.valid)
+        {
+            return;
+        }
 
         const width = texture._frame.width;
         const height = texture._frame.height;
@@ -64,11 +68,6 @@ export class CanvasSpriteRenderer
         const source = texture.baseTexture.getDrawableSource();
 
         if (texture.orig.width <= 0 || texture.orig.height <= 0 || !texture.valid || !source)
-        {
-            return;
-        }
-
-        if (!texture.valid)
         {
             return;
         }
@@ -179,10 +178,7 @@ export class CanvasSpriteRenderer
         renderer.setBlendMode(BLEND_MODES.NORMAL);
     }
 
-    /**
-     * destroy the sprite object.
-     *
-     */
+    /** destroy the sprite object */
     destroy(): void
     {
         this.renderer = null;

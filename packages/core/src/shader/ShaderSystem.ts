@@ -1,8 +1,7 @@
 import { GLProgram } from './GLProgram';
-import { generateUniformsSync, unsafeEvalSupported, defaultValue, logProgramError, compileShader } from './utils';
+import { generateUniformsSync, unsafeEvalSupported } from './utils';
 
 import type { ISystem } from '../ISystem';
-import type { IGLUniformData } from './GLProgram';
 import type { Renderer } from '../Renderer';
 import type { IRenderingContext } from '../IRenderingContext';
 import type { Shader } from './Shader';
@@ -12,8 +11,7 @@ import type { Dict } from '@pixi/utils';
 import type { UniformsSyncCallback } from './utils';
 import { generateUniformBufferSync } from './utils/generateUniformBufferSync';
 
-import { getAttributeData } from './utils/getAttributeData';
-import { getUniformData } from './utils/getUniformData';
+import { generateProgram } from './utils/generateProgram';
 
 let UID = 0;
 // default sync data so we don't create a new one each time!
@@ -22,24 +20,28 @@ const defaultSyncData = { textureCount: 0, uboCount: 0 };
 /**
  * System plugin to the renderer to manage shaders.
  *
- * @class
  * @memberof PIXI
- * @extends PIXI.System
  */
 export class ShaderSystem implements ISystem
 {
+    /**
+     * The current WebGL rendering context.
+     *
+     * @member {WebGLRenderingContext}
+     */
     protected gl: IRenderingContext;
+
     public shader: Shader;
     public program: Program;
     public id: number;
     public destroyed = false;
+
+    /** Cache to holds the generated functions. Stored against UniformObjects unique signature. */
     private cache: Dict<UniformsSyncCallback>;
     private _uboCache: Dict<{size: number, syncFunc: UniformsSyncCallback}>;
     private renderer: Renderer;
 
-    /**
-     * @param {PIXI.Renderer} renderer - The renderer this System works for.
-     */
+    /** @param renderer - The renderer this System works for. */
     constructor(renderer: Renderer)
     {
         this.renderer = renderer;
@@ -47,21 +49,11 @@ export class ShaderSystem implements ISystem
         // Validation check that this environment support `new Function`
         this.systemCheck();
 
-        /**
-         * The current WebGL rendering context
-         *
-         * @member {WebGLRenderingContext}
-         */
         this.gl = null;
 
         this.shader = null;
         this.program = null;
 
-        /**
-         * Cache to holds the generated functions. Stored against UniformObjects unique signature
-         * @type {Object}
-         * @private
-         */
         this.cache = {};
         this._uboCache = {};
 
@@ -90,18 +82,18 @@ export class ShaderSystem implements ISystem
     }
 
     /**
-     * Changes the current shader to the one given in parameter
+     * Changes the current shader to the one given in parameter.
      *
-     * @param {PIXI.Shader} shader - the new shader
-     * @param {boolean} [dontSync] - false if the shader should automatically sync its uniforms.
-     * @returns {PIXI.GLProgram} the glProgram that belongs to the shader.
+     * @param shader - the new shader
+     * @param dontSync - false if the shader should automatically sync its uniforms.
+     * @returns the glProgram that belongs to the shader.
      */
     bind(shader: Shader, dontSync?: boolean): GLProgram
     {
         shader.uniforms.globals = this.renderer.globalUniforms;
 
         const program = shader.program;
-        const glProgram = program.glPrograms[this.renderer.CONTEXT_UID] || this.generateShader(shader);
+        const glProgram = program.glPrograms[this.renderer.CONTEXT_UID] || this.generateProgram(shader);
 
         this.shader = shader;
 
@@ -126,7 +118,7 @@ export class ShaderSystem implements ISystem
     /**
      * Uploads the uniforms values to the currently bound shader.
      *
-     * @param {object} uniforms - the uniforms values that be applied to the current shader
+     * @param uniforms - the uniforms values that be applied to the current shader
      */
     setUniforms(uniforms: Dict<any>): void
     {
@@ -138,8 +130,8 @@ export class ShaderSystem implements ISystem
 
     /* eslint-disable @typescript-eslint/explicit-module-boundary-types */
     /**
+     * Syncs uniforms on the group
      *
-     * syncs uniforms on the group
      * @param group - the uniform group to sync
      * @param syncData - this is data that is passed to the sync function and any nested sync functions
      */
@@ -156,10 +148,7 @@ export class ShaderSystem implements ISystem
     }
 
     /**
-     * Overrideable by the @pixi/unsafe-eval package to use static
-     * syncUniforms instead.
-     *
-     * @private
+     * Overrideable by the @pixi/unsafe-eval package to use static syncUniforms instead.
      */
     syncUniforms(group: UniformGroup, glProgram: GLProgram, syncData: any): void
     {
@@ -261,10 +250,9 @@ export class ShaderSystem implements ISystem
     /**
      * Takes a uniform group and data and generates a unique signature for them.
      *
-     * @param {PIXI.UniformGroup} group - the uniform group to get signature of
-     * @param {Object} uniformData - uniform information generated by the shader
-     * @returns {String} Unique signature of the uniform group
-     * @private
+     * @param group - The uniform group to get signature of
+     * @param uniformData - Uniform information generated by the shader
+     * @returns Unique signature of the uniform group
      */
     private getSignature(group: {uniforms: Dict<any>}, uniformData: Dict<any>, preFix: string): string
     {
@@ -287,9 +275,10 @@ export class ShaderSystem implements ISystem
 
     /**
      * Returns the underlying GLShade rof the currently bound shader.
+     *
      * This can be handy for when you to have a little more control over the setting of your uniforms.
      *
-     * @return {PIXI.GLProgram} the glProgram for the currently bound Shader for this context
+     * @return The glProgram for the currently bound Shader for this context
      */
     getGlProgram(): GLProgram
     {
@@ -304,81 +293,29 @@ export class ShaderSystem implements ISystem
     /**
      * Generates a glProgram version of the Shader provided.
      *
-     * @private
-     * @param {PIXI.Shader} shader - the shader that the glProgram will be based on.
-     * @return {PIXI.GLProgram} A shiny new glProgram!
+     * @param shader - The shader that the glProgram will be based on.
+     * @return A shiny new glProgram!
      */
-    generateShader(shader: Shader): GLProgram
+    generateProgram(shader: Shader): GLProgram
     {
         const gl = this.gl;
-
         const program = shader.program;
 
-        const glVertShader = compileShader(gl, gl.VERTEX_SHADER, program.vertexSrc);
-        const glFragShader = compileShader(gl, gl.FRAGMENT_SHADER, program.fragmentSrc);
-
-        const webGLProgram = gl.createProgram();
-
-        gl.attachShader(webGLProgram, glVertShader);
-        gl.attachShader(webGLProgram, glFragShader);
-
-        gl.linkProgram(webGLProgram);
-
-        if (!gl.getProgramParameter(webGLProgram, gl.LINK_STATUS))
-        {
-            logProgramError(gl, webGLProgram, glVertShader, glFragShader);
-        }
-
-        program.attributeData = getAttributeData(webGLProgram, gl);
-        program.uniformData = getUniformData(webGLProgram, gl);
-
-        const keys = Object.keys(program.attributeData);
-
-        keys.sort((a, b) => (a > b) ? 1 : -1); // eslint-disable-line no-confusing-arrow
-
-        for (let i = 0; i < keys.length; i++)
-        {
-            program.attributeData[keys[i]].location = i;
-
-            gl.bindAttribLocation(webGLProgram, i, keys[i]);
-        }
-
-        gl.linkProgram(webGLProgram);
-
-        gl.deleteShader(glVertShader);
-        gl.deleteShader(glFragShader);
-
-        const uniformData: {[key: string]: IGLUniformData} = {};
-
-        for (const i in program.uniformData)
-        {
-            const data = program.uniformData[i];
-
-            uniformData[i] = {
-                location: gl.getUniformLocation(webGLProgram, i),
-                value: defaultValue(data.type, data.size),
-            };
-        }
-
-        const glProgram = new GLProgram(webGLProgram, uniformData);
+        const glProgram = generateProgram(gl, program);
 
         program.glPrograms[this.renderer.CONTEXT_UID] = glProgram;
 
         return glProgram;
     }
 
-    /**
-     * Resets ShaderSystem state, does not affect WebGL state
-     */
+    /** Resets ShaderSystem state, does not affect WebGL state. */
     reset(): void
     {
         this.program = null;
         this.shader = null;
     }
 
-    /**
-     * Destroys this System and removes all its textures
-     */
+    /** Destroys this System and removes all its textures. */
     destroy(): void
     {
         this.renderer = null;
