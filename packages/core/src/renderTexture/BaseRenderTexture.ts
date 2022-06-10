@@ -42,7 +42,6 @@ export interface BaseRenderTexture extends GlobalMixins.BaseRenderTexture, BaseT
  *
  * renderer.render(sprite, {renderTexture});  // Renders to center of RenderTexture
  * ```
- *
  * @memberof PIXI
  */
 export class BaseRenderTexture extends BaseTexture
@@ -66,7 +65,7 @@ export class BaseRenderTexture extends BaseTexture
      *   of the texture being generated.
      * @param {PIXI.MSAA_QUALITY} [options.multisample=PIXI.MSAA_QUALITY.NONE] - The number of samples of the frame buffer.
      */
-    constructor(options?: IBaseTextureOptions)
+    constructor(options: IBaseTextureOptions = {})
     {
         if (typeof options === 'number')
         {
@@ -104,7 +103,6 @@ export class BaseRenderTexture extends BaseTexture
 
     /**
      * Resizes the BaseRenderTexture.
-     *
      * @param desiredWidth - The desired width to resize to.
      * @param desiredHeight - The desired height to resize to.
      */
@@ -118,7 +116,6 @@ export class BaseRenderTexture extends BaseTexture
      * Frees the texture and framebuffer from WebGL memory without destroying this texture object.
      * This means you can still use the texture later which will upload it to GPU
      * memory again.
-     *
      * @fires PIXI.BaseTexture#dispose
      */
     dispose(): void
